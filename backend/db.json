@@ -1,0 +1,74 @@
+{
+  "users": [
+    {
+      "id": "1",
+      "name": "Ali Johan",
+      "email": "alijo@utm.my",
+      "role": "admin",
+      "password": "password123"
+    },
+    {
+      "id": "2",
+      "name": "Seman Rihan",
+      "email": "semrihan@utm.my",
+      "role": "sales"
+    },
+    {
+      "id": "e5ac",
+      "name": "Ali",
+      "email": "maju@gmail.com",
+      "role": "user",
+      "createdAt": "2025-06-22T17:03:01.728Z"
+    }
+  ],
+  "products": [
+    {
+      "id": "3",
+      "name": "Phone",
+      "price": 1999.5
+    },
+    {
+      "id": "5",
+      "name": "Desk",
+      "price": 500
+    },
+    {
+      "id": "9",
+      "name": "Book",
+      "price": 45.5
+    }
+  ],
+  "orders": [
+    {
+      "id": "1",
+      "userId": "1",
+      "productId": "5",
+      "quantity": 1,
+      "total": 500,
+      "status": "processing",
+      "createdAt": "2025-06-20T10:30:00Z",
+      "updatedAt": "2025-06-22T16:55:40.941Z"
+    },
+    {
+      "id": "3",
+      "userId": "1",
+      "productId": "5",
+      "quantity": 1,
+      "total": 500,
+      "status": "pending",
+      "createdAt": "2025-06-19T09:45:00Z",
+      "updatedAt": "2025-06-22T16:57:57.598Z"
+    },
+    {
+      "id": "e576",
+      "productId": "5",
+      "userId": "2",
+      "quantity": 1,
+      "price": 500,
+      "total": 500,
+      "status": "processing",
+      "createdAt": "2025-06-22T16:58:06.305Z",
+      "updatedAt": "2025-06-22T17:02:40.583Z"
+    }
+  ]
+}
