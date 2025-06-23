@@ -62,6 +62,9 @@ switch ($action) {
     case 'updateOrder':
         updateOrder();
         break;
+    case 'patchOrder':
+        patchOrder();
+        break;
     case 'deleteOrder':
         deleteOrder();
         break;
@@ -111,24 +114,40 @@ function createUser()
     try {
         $db = new db();
         $conn = $db->connect();
-        // Get JSON data from the request body
-        $json_data = file_get_contents('php://input');
-        // Decode JSON data into associative array
-        $data = json_decode($json_data, true);
+        
+        // Try to get data from URL parameters first (non-RESTful style)
+        $name = $_GET['name'] ?? null;
+        $email = $_GET['email'] ?? null;
+        $role = $_GET['role'] ?? 'user'; // Default role if not provided
+        
+        // If not in URL parameters, try to get from JSON body (RESTful style)
+        if (!$name || !$email) {
+            // Get JSON data from the request body
+            $json_data = file_get_contents('php://input');
+            // Decode JSON data into associative array
+            $data = json_decode($json_data, true) ?: [];
+            $name = $data['name'] ?? $name;
+            $email = $data['email'] ?? $email;
+            $role = $data['role'] ?? $role;
+        }
+        
         // Check if required fields are present
-        if (!isset($data['name']) || !isset($data['email'])) {
+        if (!$name || !$email) {
             throw new Exception("Name and email are required.");
         }
-        $name = $data['name'];
-        $email = $data['email'];
-        $role = isset($data['role']) ? $data['role'] : 'user';  // Default role if not provided
+        
         $sql = "INSERT INTO users (name, email, role) VALUES (:name, :email, :role)";
         $stmt = $conn->prepare($sql);
         $stmt->bindValue(':name', $name);
         $stmt->bindValue(':email', $email);
         $stmt->bindValue(':role', $role);
         $stmt->execute();
-        echo json_encode(["message" => "User created successfully"]);
+        
+        $userId = $conn->lastInsertId();
+        echo json_encode([
+            "message" => "User created successfully",
+            "userId" => $userId
+        ]);
         $conn = null; // Close the connection
     } catch (Exception $e) {
         echo json_encode(["error" => "Error creating user: " . $e->getMessage()]);
@@ -139,23 +158,32 @@ function updateUser() {
     try {
         $db = new db();
         $conn = $db->connect();
-        // Get JSON data from the request body
-        $json_data = file_get_contents('php://input');
-        // Decode JSON data into associative array
-        $data = json_decode($json_data, true) ?: [];
         
-        // Get ID from URL or body
-        if (isset($_GET['id'])) {
-            $id = $_GET['id'];
-        } else if (isset($data['id'])) {
-            $id = $data['id'];
-        } else {
-            throw new Exception("User ID is required.");
+        // Get data from URL parameters first (non-RESTful style)
+        $id = $_GET['id'] ?? null;
+        $name = $_GET['name'] ?? null;
+        $email = $_GET['email'] ?? null;
+        $role = $_GET['role'] ?? null;
+        
+        // If not in URL parameters, try to get from JSON body (RESTful style)
+        if (!$id || !$name || !$email) {
+            // Get JSON data from the request body
+            $json_data = file_get_contents('php://input');
+            // Decode JSON data into associative array
+            $data = json_decode($json_data, true) ?: [];
+            $id = $data['id'] ?? $id;
+            $name = $data['name'] ?? $name;
+            $email = $data['email'] ?? $email;
+            $role = $data['role'] ?? $role;
         }
         
         // Check if required fields are present
-        if (!isset($data['name']) || !isset($data['email'])) {
-            throw new Exception("Name and email are required in request body.");
+        if (!$id) {
+            throw new Exception("User ID is required.");
+        }
+        
+        if (!$name || !$email) {
+            throw new Exception("Name and email are required.");
         }
         
         // First verify if user exists
@@ -169,20 +197,35 @@ function updateUser() {
             return;
         }
         
-        $name = $data['name'];
-        $email = $data['email'];
+        // Build SQL based on provided fields
+        $updateFields = [];
+        $params = [];
         
-        $sql = "UPDATE users SET name = :name, email = :email WHERE id = :id";
+        // Always update name and email
+        $updateFields[] = "name = :name";
+        $params[':name'] = $name;
+        $updateFields[] = "email = :email";
+        $params[':email'] = $email;
+        
+        // Conditionally update role if provided
+        if ($role !== null) {
+            $updateFields[] = "role = :role";
+            $params[':role'] = $role;
+        }
+        
+        $sql = "UPDATE users SET " . implode(", ", $updateFields) . " WHERE id = :id";
         $stmt = $conn->prepare($sql);
-        $stmt->bindValue(':id', $id);
-        $stmt->bindValue(':name', $name);
-        $stmt->bindValue(':email', $email);
+        $params[':id'] = $id;
+        
+        foreach ($params as $param => $value) {
+            $stmt->bindValue($param, $value);
+        }
         $stmt->execute();
         
         if ($stmt->rowCount() > 0) {
             echo json_encode(["message" => "User updated successfully"]);
         } else {
-            echo json_encode(["error" => "User not found or no changes made"]);
+            echo json_encode(["message" => "No changes made"]);
         }
         $conn = null; // Close the connection
     } catch (Exception $e) {
@@ -194,34 +237,60 @@ function patchUser() {
     try {
         $db = new db();
         $conn = $db->connect();
-        // Get JSON data from the request body
-        $json_data = file_get_contents('php://input');
-        // Decode JSON data into associative array
-        $data = json_decode($json_data, true);
         
-        // Get ID from URL or body
-        if (isset($_GET['id'])) {
-            $id = $_GET['id'];
-        } else if (isset($data['id'])) {
-            $id = $data['id'];
-        } else {
-            throw new Exception("User ID is required.");
-        }
+        // Get data from URL parameters first (non-RESTful style)
+        $id = $_GET['id'] ?? null;
         $updateFields = [];
         $params = [];
         
-        // Only update fields that are provided
-        if (isset($data['name'])) {
+        // Check for URL parameters
+        if (isset($_GET['name'])) {
             $updateFields[] = "name = :name";
-            $params[':name'] = $data['name'];
+            $params[':name'] = $_GET['name'];
         }
-        if (isset($data['email'])) {
+        
+        if (isset($_GET['email'])) {
             $updateFields[] = "email = :email";
-            $params[':email'] = $data['email'];
+            $params[':email'] = $_GET['email'];
         }
-        if (isset($data['role'])) {
+        
+        if (isset($_GET['role'])) {
             $updateFields[] = "role = :role";
-            $params[':role'] = $data['role'];
+            $params[':role'] = $_GET['role'];
+        }
+        
+        // If not in URL parameters or more params in JSON body, try to get from there (RESTful style)
+        if (!$id || empty($updateFields)) {
+            // Get JSON data from the request body
+            $json_data = file_get_contents('php://input');
+            // Decode JSON data into associative array
+            $data = json_decode($json_data, true) ?: [];
+            
+            // Get ID if not from URL
+            if (!$id) {
+                $id = $data['id'] ?? null;
+            }
+            
+            // Additional fields from JSON body
+            if (isset($data['name']) && !isset($params[':name'])) {
+                $updateFields[] = "name = :name";
+                $params[':name'] = $data['name'];
+            }
+            
+            if (isset($data['email']) && !isset($params[':email'])) {
+                $updateFields[] = "email = :email";
+                $params[':email'] = $data['email'];
+            }
+            
+            if (isset($data['role']) && !isset($params[':role'])) {
+                $updateFields[] = "role = :role";
+                $params[':role'] = $data['role'];
+            }
+        }
+        
+        // Check if required fields are present
+        if (!$id) {
+            throw new Exception("User ID is required.");
         }
         
         if (empty($updateFields)) {
@@ -316,19 +385,27 @@ function createProduct() {
     try {
         $db = new db();
         $conn = $db->connect();
-        // Get JSON data from the request body
-        $json_data = file_get_contents('php://input');
-        // Decode JSON data into associative array
-        $data = json_decode($json_data, true);
         
-        // Check if required fields are present
-        if (!isset($data['name']) || !isset($data['price'])) {
-            throw new Exception("Name and price are required.");
+        // Try to get data from URL parameters first (non-RESTful style)
+        $name = $_GET['name'] ?? null;
+        $price = $_GET['price'] ?? null;
+        $description = $_GET['description'] ?? null;
+        
+        // If not in URL parameters, try to get from JSON body (RESTful style)
+        if (!$name || !$price) {
+            // Get JSON data from the request body
+            $json_data = file_get_contents('php://input');
+            // Decode JSON data into associative array
+            $data = json_decode($json_data, true) ?: [];
+            $name = $data['name'] ?? $name;
+            $price = $data['price'] ?? $price;
+            $description = $data['description'] ?? $description;
         }
         
-        $name = $data['name'];
-        $price = $data['price'];
-        $description = $data['description'] ?? null;
+        // Check if required fields are present
+        if (!$name || !$price) {
+            throw new Exception("Name and price are required.");
+        }
         
         $sql = "INSERT INTO products (name, price, description) VALUES (:name, :price, :description)";
         $stmt = $conn->prepare($sql);
@@ -337,7 +414,11 @@ function createProduct() {
         $stmt->bindValue(':description', $description);
         $stmt->execute();
         
-        echo json_encode(["message" => "Product created successfully"]);
+        $productId = $conn->lastInsertId();
+        echo json_encode([
+            "message" => "Product created successfully",
+            "productId" => $productId
+        ]);
         $conn = null;
     } catch (Exception $e) {
         echo json_encode(["error" => "Error creating product: " . $e->getMessage()]);
@@ -380,35 +461,60 @@ function patchProduct() {
     try {
         $db = new db();
         $conn = $db->connect();
-        // Get JSON data from the request body
-        $json_data = file_get_contents('php://input');
-        // Decode JSON data into associative array
-        $data = json_decode($json_data, true);
         
-        // Get ID from URL or body
-        if (isset($_GET['id'])) {
-            $id = $_GET['id'];
-        } else if (isset($data['id'])) {
-            $id = $data['id'];
-        } else {
-            throw new Exception("Product ID is required.");
-        }
-        
+        // Get data from URL parameters first (non-RESTful style)
+        $id = $_GET['id'] ?? null;
         $updateFields = [];
         $params = [];
         
-        // Only update fields that are provided
-        if (isset($data['name'])) {
+        // Check for URL parameters
+        if (isset($_GET['name'])) {
             $updateFields[] = "name = :name";
-            $params[':name'] = $data['name'];
+            $params[':name'] = $_GET['name'];
         }
-        if (isset($data['price'])) {
+        
+        if (isset($_GET['price'])) {
             $updateFields[] = "price = :price";
-            $params[':price'] = $data['price'];
+            $params[':price'] = $_GET['price'];
         }
-        if (isset($data['description'])) {
+        
+        if (isset($_GET['description'])) {
             $updateFields[] = "description = :description";
-            $params[':description'] = $data['description'];
+            $params[':description'] = $_GET['description'];
+        }
+        
+        // If not in URL parameters or more params in JSON body, try to get from there (RESTful style)
+        if (!$id || empty($updateFields)) {
+            // Get JSON data from the request body
+            $json_data = file_get_contents('php://input');
+            // Decode JSON data into associative array
+            $data = json_decode($json_data, true) ?: [];
+            
+            // Get ID if not from URL
+            if (!$id) {
+                $id = $data['id'] ?? null;
+            }
+            
+            // Additional fields from JSON body
+            if (isset($data['name']) && !isset($params[':name'])) {
+                $updateFields[] = "name = :name";
+                $params[':name'] = $data['name'];
+            }
+            
+            if (isset($data['price']) && !isset($params[':price'])) {
+                $updateFields[] = "price = :price";
+                $params[':price'] = $data['price'];
+            }
+            
+            if (isset($data['description']) && !isset($params[':description'])) {
+                $updateFields[] = "description = :description";
+                $params[':description'] = $data['description'];
+            }
+        }
+        
+        // Check if required fields are present
+        if (!$id) {
+            throw new Exception("Product ID is required.");
         }
         
         if (empty($updateFields)) {
@@ -467,21 +573,10 @@ function getOrders() {
         $db = new db();
         $conn = $db->connect();
         
-        $sql = "SELECT o.*, 
-                u.name as customer_name,
-                GROUP_CONCAT(
-                    JSON_OBJECT(
-                        'product_id', op.product_id,
-                        'product_name', p.name,
-                        'quantity', op.quantity,
-                        'price', p.price
-                    )
-                ) as order_items
+        $sql = "SELECT o.*, u.name as customer_name 
                 FROM orders o
-                LEFT JOIN users u ON o.user_id = u.id
-                LEFT JOIN order_products op ON o.id = op.order_id
-                LEFT JOIN products p ON op.product_id = p.id
-                GROUP BY o.id";
+                LEFT JOIN users u ON o.userId = u.id
+                ORDER BY o.createdAt DESC";
                 
         $stmt = $conn->prepare($sql);
         $stmt->execute();
@@ -490,18 +585,6 @@ function getOrders() {
         // Ensure we're always returning an array
         $orders = $orders ?: [];
         
-        // Parse the order_items JSON string for each order
-        foreach ($orders as &$order) {
-            if ($order['order_items']) {
-                $items = explode(',', $order['order_items']);
-                $order['order_items'] = array_map(function($item) {
-                    return json_decode($item, true);
-                }, $items);
-            } else {
-                $order['order_items'] = [];
-            }
-        }
-        
         // Important: Ensure we're sending a clean JSON array
         header('Content-Type: application/json');
         echo json_encode(array_values($orders));
@@ -509,6 +592,10 @@ function getOrders() {
     } catch (PDOException $e) {
         header('Content-Type: application/json');
         echo json_encode(["error" => "Database error: " . $e->getMessage()]);
+    } finally {
+        if (isset($conn)) {
+            $conn = null; // Close the connection
+        }
     }
 }
 
@@ -522,22 +609,10 @@ function getOrderById() {
         }
         
         $id = $_GET['id'];
-        $sql = "SELECT o.*, 
-                u.name as customer_name,
-                GROUP_CONCAT(
-                    JSON_OBJECT(
-                        'product_id', op.product_id,
-                        'product_name', p.name,
-                        'quantity', op.quantity,
-                        'price', p.price
-                    )
-                ) as order_items
+        $sql = "SELECT o.*, u.name as customer_name 
                 FROM orders o
-                LEFT JOIN users u ON o.user_id = u.id
-                LEFT JOIN order_products op ON o.id = op.order_id
-                LEFT JOIN products p ON op.product_id = p.id
-                WHERE o.id = :id
-                GROUP BY o.id";
+                LEFT JOIN users u ON o.userId = u.id
+                WHERE o.id = :id";
                 
         $stmt = $conn->prepare($sql);
         $stmt->bindValue(':id', $id);
@@ -545,13 +620,6 @@ function getOrderById() {
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($order) {
-            if ($order['order_items']) {
-                $order['order_items'] = array_map(function($item) {
-                    return json_decode($item, true);
-                }, explode(',', $order['order_items']));
-            } else {
-                $order['order_items'] = [];
-            }
             echo json_encode($order);
         } else {
             echo json_encode(["error" => "Order not found"]);
@@ -569,45 +637,78 @@ function createOrder() {
         // Start transaction
         $conn->beginTransaction();
         
-        // Get order data from query parameters
+        // Handle both non-RESTful URL parameters and RESTful JSON body
         $userId = $_GET['userId'] ?? null;
-        $items = isset($_GET['items']) ? json_decode($_GET['items'], true) : null;
         $status = $_GET['status'] ?? 'pending';
+        $items = null;
         
-        if (!$userId || !$items) {
-            throw new Exception("User ID and items are required.");
+        // Check if we have individual product parameters (non-RESTful style)
+        if (isset($_GET['productId']) && isset($_GET['productName']) && isset($_GET['price']) && isset($_GET['quantity'])) {
+            // Single item from URL parameters
+            $items = [[
+                'productId' => $_GET['productId'],
+                'productName' => $_GET['productName'],
+                'price' => $_GET['price'],
+                'quantity' => $_GET['quantity']
+            ]];
+        } else if (isset($_GET['items'])) {
+            // Items array from URL parameter
+            $items = json_decode($_GET['items'], true);
         }
         
-        // Create order
-        $sql = "INSERT INTO orders (user_id, status, created_at) VALUES (:user_id, :status, NOW())";
-        $stmt = $conn->prepare($sql);
-        $stmt->bindValue(':user_id', $userId);
-        $stmt->bindValue(':status', $status);
-        $stmt->execute();
+        // If not in URL parameters, try to get from JSON body (RESTful style)
+        if (!$userId || !$items) {
+            $json_data = file_get_contents('php://input');
+            $data = json_decode($json_data, true) ?: [];
+            $userId = $data['userId'] ?? $userId;
+            $items = $data['items'] ?? $items;
+            $status = $data['status'] ?? $status;
+        }
         
-        $orderId = $conn->lastInsertId();
+        if (!$userId || !$items) {
+            throw new Exception("User ID and items are required. For non-RESTful: provide userId, productId, productName, price, quantity. For RESTful: provide userId and items array.");
+        }
         
-        // Add order items
-        $itemSql = "INSERT INTO order_products (order_id, product_id, quantity) VALUES (:order_id, :product_id, :quantity)";
-        $itemStmt = $conn->prepare($itemSql);
-        
+        // Process each item as a separate order
+        $orderIds = [];
         foreach ($items as $item) {
-            $itemStmt->bindValue(':order_id', $orderId);
-            $itemStmt->bindValue(':product_id', $item['productId']);
-            $itemStmt->bindValue(':quantity', $item['quantity']);
-            $itemStmt->execute();
+            // Calculate total
+            $total = $item['quantity'] * $item['price'];
+            
+            $sql = "INSERT INTO orders (userId, productId, quantity, total, productName, price, totalAmount, status, createdAt) 
+                   VALUES (:userId, :productId, :quantity, :total, :productName, :price, :totalAmount, :status, NOW())";
+            $stmt = $conn->prepare($sql);
+            
+            $stmt->bindValue(':userId', $userId);
+            $stmt->bindValue(':productId', $item['productId']);
+            $stmt->bindValue(':quantity', $item['quantity']);
+            $stmt->bindValue(':total', $total);
+            $stmt->bindValue(':productName', $item['productName']);
+            $stmt->bindValue(':price', $item['price']);
+            $stmt->bindValue(':totalAmount', $total); // Same as total in this case
+            $stmt->bindValue(':status', $status);
+            $stmt->execute();
+            
+            $orderIds[] = $conn->lastInsertId();
         }
         
         // Commit transaction
         $conn->commit();
         
-        echo json_encode(["message" => "Order created successfully", "orderId" => $orderId]);
+        echo json_encode([
+            "message" => "Orders created successfully", 
+            "orderIds" => $orderIds
+        ]);
     } catch (Exception $e) {
         // Rollback on error
-        if ($conn) {
+        if ($conn && $conn->inTransaction()) {
             $conn->rollBack();
         }
         echo json_encode(["error" => "Error creating order: " . $e->getMessage()]);
+    } finally {
+        if (isset($conn)) {
+            $conn = null; // Close the connection
+        }
     }
 }
 
@@ -619,53 +720,166 @@ function updateOrder() {
         // Start transaction
         $conn->beginTransaction();
         
+        // Get data from URL parameters first (non-RESTful style)
         $id = $_GET['id'] ?? null;
-        $status = $_GET['status'] ?? null;
-        $items = isset($_GET['items']) ? json_decode($_GET['items'], true) : null;
+        $updateFields = [];
+        $params = [];
+        
+        // Check for URL parameters
+        $allowedFields = ['quantity', 'total', 'status', 'price', 'totalAmount'];
+        foreach ($allowedFields as $field) {
+            if (isset($_GET[$field])) {
+                $updateFields[] = "$field = :$field";
+                $params[":$field"] = $_GET[$field];
+            }
+        }
+        
+        // If not in URL parameters or more params in JSON body, try to get from there (RESTful style)
+        if (!$id || empty($updateFields)) {
+            // Get JSON data from the request body
+            $json_data = file_get_contents('php://input');
+            // Decode JSON data into associative array
+            $data = json_decode($json_data, true) ?: [];
+            
+            // Get ID if not from URL
+            if (!$id) {
+                $id = $data['id'] ?? null;
+            }
+            
+            // Additional fields from JSON body
+            foreach ($allowedFields as $field) {
+                if (isset($data[$field]) && !isset($params[":$field"])) {
+                    $updateFields[] = "$field = :$field";
+                    $params[":$field"] = $data[$field];
+                }
+            }
+        }
         
         if (!$id) {
             throw new Exception("Order ID is required.");
         }
         
-        // Update order status if provided
-        if ($status) {
-            $sql = "UPDATE orders SET status = :status WHERE id = :id";
-            $stmt = $conn->prepare($sql);
-            $stmt->bindValue(':id', $id);
-            $stmt->bindValue(':status', $status);
-            $stmt->execute();
+        if (empty($updateFields)) {
+            throw new Exception("No fields to update. Supported fields are: " . implode(", ", $allowedFields));
         }
         
-        // Update order items if provided
-        if ($items) {
-            // Remove existing items
-            $deleteSql = "DELETE FROM order_products WHERE order_id = :order_id";
-            $deleteStmt = $conn->prepare($deleteSql);
-            $deleteStmt->bindValue(':order_id', $id);
-            $deleteStmt->execute();
-            
-            // Add new items
-            $itemSql = "INSERT INTO order_products (order_id, product_id, quantity) VALUES (:order_id, :product_id, :quantity)";
-            $itemStmt = $conn->prepare($itemSql);
-            
-            foreach ($items as $item) {
-                $itemStmt->bindValue(':order_id', $id);
-                $itemStmt->bindValue(':product_id', $item['productId']);
-                $itemStmt->bindValue(':quantity', $item['quantity']);
-                $itemStmt->execute();
-            }
+        // Add updatedAt
+        $updateFields[] = "updatedAt = NOW()";
+        
+        $sql = "UPDATE orders SET " . implode(", ", $updateFields) . " WHERE id = :id";
+        $stmt = $conn->prepare($sql);
+        $params[':id'] = $id;
+        
+        foreach ($params as $param => $value) {
+            $stmt->bindValue($param, $value);
         }
+        
+        $stmt->execute();
         
         // Commit transaction
         $conn->commit();
         
-        echo json_encode(["message" => "Order updated successfully"]);
+        if ($stmt->rowCount() > 0) {
+            echo json_encode(["message" => "Order updated successfully"]);
+        } else {
+            echo json_encode(["message" => "Order not found or no changes made"]);
+        }
     } catch (Exception $e) {
         // Rollback on error
-        if ($conn) {
+        if ($conn && $conn->inTransaction()) {
             $conn->rollBack();
         }
         echo json_encode(["error" => "Error updating order: " . $e->getMessage()]);
+    } finally {
+        if (isset($conn)) {
+            $conn = null; // Close the connection
+        }
+    }
+}
+
+function patchOrder() {
+    try {
+        $db = new db();
+        $conn = $db->connect();
+        
+        // Start transaction
+        $conn->beginTransaction();
+        
+        // Get data from URL parameters first (non-RESTful style)
+        $id = $_GET['id'] ?? null;
+        $updateFields = [];
+        $params = [];
+        
+        // Check for URL parameters
+        $allowedFields = ['quantity', 'total', 'status', 'price', 'totalAmount'];
+        foreach ($allowedFields as $field) {
+            if (isset($_GET[$field])) {
+                $updateFields[] = "$field = :$field";
+                $params[":$field"] = $_GET[$field];
+            }
+        }
+        
+        // If not in URL parameters or more params in JSON body, try to get from there (RESTful style)
+        if (!$id || empty($updateFields)) {
+            // Get JSON data from the request body
+            $json_data = file_get_contents('php://input');
+            // Decode JSON data into associative array
+            $data = json_decode($json_data, true) ?: [];
+            
+            // Get ID if not from URL
+            if (!$id) {
+                $id = $data['id'] ?? null;
+            }
+            
+            // Additional fields from JSON body
+            foreach ($allowedFields as $field) {
+                if (isset($data[$field]) && !isset($params[":$field"])) {
+                    $updateFields[] = "$field = :$field";
+                    $params[":$field"] = $data[$field];
+                }
+            }
+        }
+        
+        if (!$id) {
+            throw new Exception("Order ID is required.");
+        }
+        
+        if (empty($updateFields)) {
+            throw new Exception("No fields to update. Supported fields are: " . implode(", ", $allowedFields));
+        }
+        
+        // Add updatedAt
+        $updateFields[] = "updatedAt = NOW()";
+        
+        $sql = "UPDATE orders SET " . implode(", ", $updateFields) . " WHERE id = :id";
+        $stmt = $conn->prepare($sql);
+        $params[':id'] = $id;
+        
+        foreach ($params as $param => $value) {
+            $stmt->bindValue($param, $value);
+        }
+        
+        $stmt->execute();
+        
+        if ($stmt->rowCount() > 0) {
+            // Commit transaction
+            $conn->commit();
+            echo json_encode(["message" => "Order patched successfully"]);
+        } else {
+            // Commit transaction anyway - no changes doesn't mean error
+            $conn->commit();
+            echo json_encode(["message" => "Order not found or no changes made"]);
+        }
+    } catch (Exception $e) {
+        // Rollback on error
+        if ($conn && $conn->inTransaction()) {
+            $conn->rollBack();
+        }
+        echo json_encode(["error" => "Error patching order: " . $e->getMessage()]);
+    } finally {
+        if (isset($conn)) {
+            $conn = null; // Close the connection
+        }
     }
 }
 
@@ -674,40 +888,37 @@ function deleteOrder() {
         $db = new db();
         $conn = $db->connect();
         
+        // Get ID from query parameters
         if (!isset($_GET['id'])) {
             throw new Exception("Order ID is required.");
         }
         
+        $id = $_GET['id'];
+        
         // Start transaction
         $conn->beginTransaction();
         
-        $id = $_GET['id'];
+        $sql = "DELETE FROM orders WHERE id = :id";
+        $stmt = $conn->prepare($sql);
+        $stmt->bindValue(':id', $id);
+        $stmt->execute();
         
-        // Delete order items first (foreign key constraint)
-        $deleteItemsSql = "DELETE FROM order_products WHERE order_id = :id";
-        $deleteItemsStmt = $conn->prepare($deleteItemsSql);
-        $deleteItemsStmt->bindValue(':id', $id);
-        $deleteItemsStmt->execute();
-        
-        // Delete the order
-        $deleteOrderSql = "DELETE FROM orders WHERE id = :id";
-        $deleteOrderStmt = $conn->prepare($deleteOrderSql);
-        $deleteOrderStmt->bindValue(':id', $id);
-        $deleteOrderStmt->execute();
-        
-        // Commit transaction
-        $conn->commit();
-        
-        if ($deleteOrderStmt->rowCount() > 0) {
+        if ($stmt->rowCount() > 0) {
+            // Commit transaction
+            $conn->commit();
             echo json_encode(["message" => "Order deleted successfully"]);
         } else {
-            echo json_encode(["error" => "Order not found"]);
+            throw new Exception("Order not found");
         }
     } catch (Exception $e) {
         // Rollback on error
-        if ($conn) {
+        if ($conn && $conn->inTransaction()) {
             $conn->rollBack();
         }
         echo json_encode(["error" => "Error deleting order: " . $e->getMessage()]);
+    } finally {
+        if (isset($conn)) {
+            $conn = null; // Close the connection
+        }
     }
 }

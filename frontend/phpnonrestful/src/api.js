@@ -3,8 +3,8 @@ const API_BASE_URL = 'http://localhost:3000/index.php'
 // Generic fetch wrapper
 async function apiRequest(action, params = {}, options = {}) {
     const url = `${API_BASE_URL}?action=${action}${Object.keys(params)
-            .map(key => `&${key}=${encodeURIComponent(params[key])}`)
-            .join('')
+        .map(key => `&${key}=${encodeURIComponent(params[key])}`)
+        .join('')
         }`
 
     const config = {

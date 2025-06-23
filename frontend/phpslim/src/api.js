@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3000'
+const API_BASE_URL = 'http://localhost:8088'
 
 // Generic fetch wrapper
 async function apiRequest(endpoint, options = {}) {
